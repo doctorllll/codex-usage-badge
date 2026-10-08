@@ -1,10 +1,28 @@
+// Only measure project roots under an allowlist (default ~/code, override with
+// CODEX_BADGE_SIZE_ROOTS). Walking home, cloud-synced or network folders can trigger
+// file-provider downloads or remote traffic even when only metadata is read.
+function sizeRootStatus(root) {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  let real;
+  try { real = fs.realpathSync(root); } catch { return 'missing'; }
+  const bases = (process.env.CODEX_BADGE_SIZE_ROOTS || path.join(require('node:os').homedir(), 'code')).split(path.delimiter).filter(Boolean);
+  return bases.some(base => {
+    try { const allowed = fs.realpathSync(base); return real === allowed || real.startsWith(allowed + path.sep); }
+    catch { return false; }
+  }) ? 'allowed' : 'outside';
+}
+
 function measureDirectory(root, { timeoutMs = 180000, signal } = {}) {
   if (signal?.aborted) return Promise.reject(new Error('扫描已停止'));
+  const status = sizeRootStatus(root);
+  if (status === 'missing') return Promise.reject(new Error('项目路径不可用'));
+  if (status === 'outside') return Promise.reject(new Error('仅统计允许目录（默认 ~/code）下的本地项目'));
   if (process.platform === 'win32') return measureDirectoryPortable(root, { timeoutMs, signal });
   return new Promise((resolve, reject) => {
     const { spawn } = require('node:child_process');
     const command = process.platform === 'darwin' ? '/usr/bin/du' : 'du';
-    const child = spawn(command, ['-sk', root], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(command, ['-skx', root], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '', stderr = '', settled = false;
     const finish = (error, bytes) => {
       if (settled) return; settled = true; clearTimeout(timer);

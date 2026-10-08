@@ -6,6 +6,7 @@ const { chromium } = require('playwright');
 const { installProjectSizes, ProjectSizeScanner, measureDirectory, measureDirectoryPortable, refreshProjectSizes } = require('../agent.cjs');
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'badge-project-sizes-'));
+process.env.CODEX_BADGE_SIZE_ROOTS = temp;
 const firstRoot = path.join(temp, '项目 A');
 const secondRoot = path.join(temp, 'project-b');
 fs.mkdirSync(path.join(firstRoot, 'nested'), { recursive: true });
@@ -23,6 +24,9 @@ body{margin:0;background:#1e2021;color:#e5e7e8;font:14px -apple-system,sans-seri
   assert.ok(measured >= 2048, 'real directory measurement must include the test file');
   assert.equal(await measureDirectoryPortable(firstRoot), 2048, 'portable measurement reads file metadata');
   await assert.rejects(measureDirectory(path.join(temp, 'missing')), /./, 'missing directory is not zero bytes');
+  await assert.rejects(measureDirectory(os.homedir()), /允许目录/, 'home and other roots outside the allowlist are never walked');
+  fs.symlinkSync(os.homedir(), path.join(temp, 'escape'));
+  await assert.rejects(measureDirectory(path.join(temp, 'escape')), /允许目录/, 'a symlink cannot escape the allowlist');
   const canceled = new AbortController(); canceled.abort();
   await assert.rejects(measureDirectory(firstRoot, {signal: canceled.signal}));
   await assert.rejects(measureDirectoryPortable(firstRoot, {signal: canceled.signal}));
