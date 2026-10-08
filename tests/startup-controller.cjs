@@ -2,11 +2,12 @@
 const assert=require('node:assert/strict');
 const {StartupController}=require('../macos/startup/controller.cjs');
 const app=(key='new',overrides={})=>({key,pid:20,launchedAt:99500,finishedLaunching:true,argumentsKnown:true,debugPort:null,...overrides});
-async function scenario({baseline=[],fresh=[app()],snapshot={},quit=true,exit=true,launch=true,failReceipt=false,lastAttemptAt=0,onSleep,onLaunch,portInUse=false,foreground=20}={},verify) {
-  let now=100000, calls=[], records=[], apps=baseline, input='1', frontmost=foreground;
+async function scenario({baseline=[],fresh=[app()],snapshot={},quit=true,exit=true,launch=true,failReceipt=false,lastAttemptAt=0,onSleep,onLaunch,portInUse=false,foreground=20,notifyFails=false}={},verify) {
+  let now=100000, calls=[], records=[], notices=[], apps=baseline, input='1', frontmost=foreground;
   const adapter={
     snapshot:async()=>({apps,frontmostPid:frontmost,inputStamp:input,inputIdleMs:10000,...snapshot}),
     portInUse:async()=>portInUse,
+    notifyMissed:async event=>{notices.push(event);if(notifyFails)throw Error('notification denied');},
     record:async(event,details)=>{records.push(event);if(event==='attempt'&&failReceipt)throw Error('disk full');},
     quit:async(a,stamp)=>{calls.push('quit');if(exit&&quit){apps=[];frontmost=30;}return {accepted:quit};},
     launch:async()=>{calls.push('launch');apps=[app('replacement',{debugPort:'39222'})];onLaunch?.();return {launched:launch,key:'replacement',pid:21};},
@@ -14,7 +15,7 @@ async function scenario({baseline=[],fresh=[app()],snapshot={},quit=true,exit=tr
   };
   const control=new StartupController(adapter,{now:()=>now,sleep:async ms=>{now+=ms;onSleep?.({setApps:v=>apps=v,setInput:v=>input=v,stop:()=>control.stop()});},lastAttemptAt});
   await control.tick();apps=fresh;await control.tick();
-  await verify({calls,records,control,adapter,setApps:v=>apps=v,setNow:v=>now=v,setInput:v=>input=v,setFrontmost:v=>frontmost=v});
+  await verify({calls,records,notices,control,adapter,setApps:v=>apps=v,setNow:v=>now=v,setInput:v=>input=v,setFrontmost:v=>frontmost=v});
 }
 (async()=>{
   await scenario({},({calls})=>assert.deepEqual(calls,['quit','launch','show']));
@@ -50,10 +51,27 @@ async function scenario({baseline=[],fresh=[app()],snapshot={},quit=true,exit=tr
     setNow(500000);await control.tick(); // do not restart an ignored instance after cooldown
     assert.deepEqual(calls,['quit','launch','show']);
   });
+  // Every outcome that leaves the client running without the debug port notifies exactly once.
+  await scenario({},({notices})=>assert.deepEqual(notices,[]));
+  await scenario({baseline:[app()]},({notices})=>assert.deepEqual(notices,[]));
+  await scenario({snapshot:{inputIdleMs:100}},async({notices,control})=>{
+    assert.deepEqual(notices,['skipped-active-or-background']);await control.tick();assert.deepEqual(notices,['skipped-active-or-background']);
+  });
+  await scenario({snapshot:{frontmostPid:30}},async({notices,control,setNow})=>{
+    assert.deepEqual(notices,[]);setNow(110000);await control.tick();assert.deepEqual(notices,['skipped-active-or-background']);
+  });
+  await scenario({lastAttemptAt:99000},({notices})=>assert.deepEqual(notices,['skipped-cooldown']));
+  await scenario({quit:false},({notices})=>assert.deepEqual(notices,['quit-refused']));
+  await scenario({exit:false},({notices})=>assert.deepEqual(notices,['quit-timeout']));
+  for(const options of [{portInUse:true},{failReceipt:true},{launch:false},{onSleep:({setInput})=>setInput('2')}])
+    await scenario(options,({notices})=>assert.deepEqual(notices,[]));
+  await scenario({snapshot:{inputIdleMs:100},notifyFails:true},({calls,records})=>{
+    assert.deepEqual(calls,[]);assert.ok(records.includes('skipped-active-or-background'));assert.ok(!records.includes('error'));
+  });
   // Switch to a browser during the launch callback: never activate Codex afterwards.
   let input='1', calls=[], now=100000, apps=[];
   const adapter={snapshot:async()=>({apps,frontmostPid:apps.length?20:30,inputStamp:input,inputIdleMs:10000}),portInUse:async()=>false,record:async()=>{},quit:async()=>{calls.push('quit');apps=[];return{accepted:true};},launch:async()=>{calls.push('launch');input='2';return{launched:true,key:'newer',pid:21};},show:async(a,stamp)=>{if(stamp===input)calls.push('show');return{shown:false};}};
   const control=new StartupController(adapter,{now:()=>now,sleep:async ms=>{now+=ms;}});
   await control.tick();apps=[app()];await control.tick();assert.deepEqual(calls,['quit','launch']);
-  console.log('PASS startup guards: existing/old/background/interactive/ambiguous instances, known flags, receipt failure, cooldown, no retry, graceful refusal/timeout, user cancellation, manual reopen, stop and no focus after app switch');
+  console.log('PASS startup guards: existing/old/background/interactive/ambiguous instances, known flags, receipt failure, cooldown, no retry, graceful refusal/timeout, user cancellation, manual reopen, stop, no focus after app switch and one notice per missed load');
 })().catch(error=>{console.error(error);process.exitCode=1;});

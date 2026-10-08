@@ -23,6 +23,8 @@ const adapter={
   quit:(app,stamp)=>native('quit',app.pid,app.key,stamp),
   launch:(stamp,frontmost)=>native('launch',stamp,frontmost),
   show:(app,stamp,frontmost)=>native('show',app.pid,app.key,stamp,frontmost),
+  // A system notification is the only prompt: never restart the client on the user's behalf here.
+  notifyMissed:()=>run('/usr/bin/osascript',['-e','display notification "这次启动没有加载用量条。方便时按 ⌘Q 退出 Codex，再从原图标打开，头 2 秒别操作。" with title "Codex 用量条"'],{timeout:5000}).then(()=>{},()=>{}),
   portInUse:()=>new Promise(resolve=>{
     const socket=net.createConnection({host:'127.0.0.1',port:39222});
     const done=value=>{socket.destroy();resolve(value);};

@@ -6,6 +6,11 @@ class StartupController {
     this.baselined=false; this.seen=new Set(); this.busy=false; this.stopped=false;
   }
   stop() { this.stopped=true; }
+  // The client keeps running without the debug port and will not be retried: tell the user once.
+  async missed(event) {
+    await this.adapter.record(event);
+    try { await this.adapter.notifyMissed?.(event); } catch {}
+  }
   async tick() {
     if(this.busy||this.stopped)return;
     this.busy=true;
@@ -33,10 +38,10 @@ class StartupController {
       // Remember even rejected candidates: do not revisit a running work window later.
       this.seen.add(app.key);
       if(age<0||age>8000||snapshot.inputIdleMs<age||snapshot.frontmostPid!==app.pid) {
-        await this.adapter.record('skipped-active-or-background'); return;
+        await this.missed('skipped-active-or-background'); return;
       }
       if(this.lastAttemptAt && this.now()-this.lastAttemptAt<this.cooldownMs) {
-        await this.adapter.record('skipped-cooldown'); return;
+        await this.missed('skipped-cooldown'); return;
       }
       if(await this.adapter.portInUse()) { await this.adapter.record('port-in-use'); return; }
       if(this.stopped)return;
@@ -45,7 +50,7 @@ class StartupController {
       await this.adapter.record('attempt',{lastAttemptAt:this.lastAttemptAt,processKey:app.key});
       if(this.stopped)return;
       const quit=await this.adapter.quit(app,snapshot.inputStamp);
-      if(!quit.accepted) { await this.adapter.record('quit-refused'); return; }
+      if(!quit.accepted) { await this.missed('quit-refused'); return; }
       const deadline=this.now()+10000;
       let absent=null;
       while(!this.stopped&&this.now()<deadline) {
@@ -58,7 +63,7 @@ class StartupController {
         if(current.apps.length===0) { absent=current; break; }
       }
       if(this.stopped)return;
-      if(!absent) { await this.adapter.record('quit-timeout'); return; }
+      if(!absent) { await this.missed('quit-timeout'); return; }
       // User input during shutdown means they may have canceled/changed their mind; do not reopen.
       if(absent.inputStamp!==snapshot.inputStamp) { await this.adapter.record('canceled-by-input'); return; }
       await this.sleep(250);
