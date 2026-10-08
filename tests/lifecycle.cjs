@@ -81,5 +81,6 @@ const manager=sandbox.module.exports;
   await manager.install();await manager.uninstall();
   assert.equal(fs.readFileSync(shortcut,'utf8'),'unrelated desktop file');assert.ok(fs.existsSync(path.join(launcher,'Contents/Info.plist')));
   assert.ok(manager.startupConfig().ProgramArguments.at(-1).endsWith('startup-helper/watch.cjs'));
+  assert.equal(manager.startupConfig().ProcessType,'Interactive','startup helper must not be throttled during client launch');
   console.log('PASS original-icon install, two-service rollback, cooldown preservation, legacy migration, offline uninstall and unrelated shortcut preservation');
 }finally{fs.rmSync(temp,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1;});

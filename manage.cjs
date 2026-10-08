@@ -51,11 +51,13 @@ async function stop(job) {
   throw new Error(`后台任务未能停止：${job}`);
 }
 function quoteShell(value) { return "'" + value.replaceAll("'", "'\\''") + "'"; }
+// Agent and startup helper are time-sensitive at client launch; Background ProcessType lets
+// macOS throttle them for 20-35s while the client starts, missing the restart window.
 function agentConfig() {
   return {
     Label: label, ProgramArguments: [node, path.join(installDir,'agent.cjs')],
     EnvironmentVariables: { ...(process.env.CODEX_HOME ? {CODEX_HOME:process.env.CODEX_HOME} : {}), CODEX_BADGE_APP:app, CODEX_BADGE_BIN:resolveCodexBin(undefined,app), CODEX_BADGE_PORT:'39222', CODEX_BADGE_DEBUG:'0' },
-    RunAtLoad:true, KeepAlive:{SuccessfulExit:false}, ThrottleInterval:10, ProcessType:'Background',
+    RunAtLoad:true, KeepAlive:{SuccessfulExit:false}, ThrottleInterval:10, ProcessType:'Interactive',
     StandardOutPath:path.join(logs,'CodexUsageBadge.out.log'), StandardErrorPath:path.join(logs,'CodexUsageBadge.err.log')
   };
 }
@@ -80,7 +82,7 @@ function ownedShortcut() {
 }
 function startupConfig() {
   return {Label:startupLabel,ProgramArguments:[node,path.join(startupDir,'watch.cjs')],RunAtLoad:true,
-    KeepAlive:{SuccessfulExit:false},ThrottleInterval:10,ProcessType:'Background',
+    KeepAlive:{SuccessfulExit:false},ThrottleInterval:10,ProcessType:'Interactive',
     StandardOutPath:path.join(logs,'CodexUsageBadge.startup.out.log'),StandardErrorPath:path.join(logs,'CodexUsageBadge.startup.err.log')};
 }
 function updaterConfig(){

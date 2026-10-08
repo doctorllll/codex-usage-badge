@@ -25,6 +25,7 @@ try {
   const custom=path.join(root,'explicit-codex');executable(custom);
   assert.equal(resolveCodexBin(custom,root),custom);
   assert.equal(agentConfig().ProgramArguments[0],process.execPath);
+  assert.equal(agentConfig().ProcessType,'Interactive','agent must not be throttled during client launch');
   const usage=formatRateLimits({rateLimits:{limitId:'codex',planType:'prolite',primary:{usedPercent:7,windowDurationMins:10080},secondary:null}});
   assert.equal(usage.percent,93);
   assert.equal(usage.windowLabel,'周');
